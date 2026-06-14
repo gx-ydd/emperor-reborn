@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="zh-CN">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Emperor Reborn MVP</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin: 0;
+      background: #111827;
+      color: #e5e7eb;
+    }
+
+    main {
+      max-width: 920px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    h1 {
+      margin-top: 0;
+    }
+
+    #status {
+      color: #93c5fd;
+      margin-bottom: 12px;
+    }
+
+    #messages {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      min-height: 60vh;
+    }
+
+    .msg {
+      padding: 12px 14px;
+      border-radius: 12px;
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
+
+    .user {
+      background: #1f2937;
+      border: 1px solid #374151;
+      align-self: flex-end;
+      max-width: 78%;
+    }
+
+    .assistant {
+      background: #172554;
+      border: 1px solid #1d4ed8;
+      align-self: flex-start;
+      max-width: 86%;
+    }
+
+    .event {
+      font-size: 12px;
+      color: #9ca3af;
+    }
+
+    form {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+
+    textarea {
+      flex: 1;
+      min-height: 72px;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #374151;
+      background: #030712;
+      color: #e5e7eb;
+      resize: vertical;
+    }
+
+    button {
+      width: 110px;
+      border: 0;
+      border-radius: 10px;
+      background: #2563eb;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      background: #4b5563;
+      cursor: not-allowed;
+    }
+
+    code {
+      background: #030712;
+      padding: 2px 5px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    <h1>Emperor Reborn MVP</h1>
+    <div id="status">连接中...</div>
+    <div id="messages"></div>
+    <form id="form">
+      <textarea id="input" placeholder="输入消息。例如：列出当前项目里的 Python 文件，并总结作用。"></textarea>
+      <button id="send" type="submit">发送</button>
+    </form>
+  </main>
+
+  <script>
+    const statusEl = document.getElementById('status')
+    const messagesEl = document.getElementById('messages')
+    const form = document.getElementById('form')
+    const input = document.getElementById('input')
+    const send = document.getElementById('send')
+
+    let ws
+    let currentAssistantEl = null
+
+    function addMessage(role, content) {
+      const el = document.createElement('div')
+      el.className = `msg ${role}`
+      el.textContent = content
+      messagesEl.appendChild(el)
+      window.scrollTo(0, document.body.scrollHeight)
+      return el
+    }
+
+    function addEvent(content) {
+      const el = document.createElement('div')
+      el.className = 'event'
+      el.textContent = content
+      messagesEl.appendChild(el)
+      window.scrollTo(0, document.body.scrollHeight)
+    }
+
+    async function loadHistory() {
+      const res = await fetch('/api/history')
+      const rows = await res.json()
+      messagesEl.innerHTML = ''
+      for (const row of rows) {
+        addMessage(row.role === 'assistant' ? 'assistant' : 'user', row.content)
+      }
+    }
+
+    function connect() {
+      const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
+      ws = new WebSocket(`${protocol}://${location.host}/ws`)
+
+      ws.onopen = () => {
+        statusEl.textContent = '已连接'
+      }
+
+      ws.onclose = () => {
+        statusEl.textContent = '连接断开，2 秒后重连...'
+        setTimeout(connect, 2000)
+      }
+
+      ws.onmessage = (message) => {
+        const data = JSON.parse(message.data)
+        const event = data.event
+        const payload = data.payload || {}
+
+        if (event === 'ready') {
+          statusEl.textContent = `已连接 · 模型：${payload.model}`
+        } else if (event === 'user_message') {
+          currentAssistantEl = null
+        } else if (event === 'assistant_start') {
+          currentAssistantEl = addMessage('assistant', '')
+          send.disabled = true
+        } else if (event === 'message_delta') {
+          if (!currentAssistantEl) currentAssistantEl = addMessage('assistant', '')
+          currentAssistantEl.textContent += payload.content || ''
+          window.scrollTo(0, document.body.scrollHeight)
+        } else if (event === 'tool_call') {
+          addEvent(`调用工具：${payload.tool_name} ${JSON.stringify(payload.args)}`)
+        } else if (event === 'tool_result') {
+          addEvent(`工具结果：${String(payload.content).slice(0, 500)}`)
+        } else if (event === 'assistant_done') {
+          send.disabled = false
+          currentAssistantEl = null
+        } else if (event === 'error') {
+          send.disabled = false
+          addEvent(`错误：${payload.message || JSON.stringify(payload)}`)
+        }
+      }
+    }
+
+    form.addEventListener('submit', (event) => {
+      event.preventDefault()
+      const text = input.value.trim()
+      if (!text) return
+      addMessage('user', text)
+      input.value = ''
+      send.disabled = true
+      ws.send(JSON.stringify({ type: 'user_message', content: text }))
+    })
+
+    loadHistory().then(connect)
+  </script>
+</body>
+
+</html>

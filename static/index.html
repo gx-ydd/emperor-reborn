@@ -1,10 +1,9 @@
 <!doctype html>
 <html lang="zh-CN">
-
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Emperor Reborn MVP</title>
+  <title>Emperor Reborn</title>
   <style>
     body {
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -14,18 +13,20 @@
     }
 
     main {
-      max-width: 920px;
+      max-width: 980px;
       margin: 0 auto;
       padding: 24px;
     }
 
     h1 {
       margin-top: 0;
+      margin-bottom: 8px;
     }
 
     #status {
       color: #93c5fd;
       margin-bottom: 12px;
+      font-size: 14px;
     }
 
     #messages {
@@ -33,6 +34,7 @@
       flex-direction: column;
       gap: 12px;
       min-height: 60vh;
+      padding-bottom: 12px;
     }
 
     .msg {
@@ -59,6 +61,14 @@
     .event {
       font-size: 12px;
       color: #9ca3af;
+      border-left: 3px solid #4b5563;
+      padding-left: 10px;
+      white-space: pre-wrap;
+    }
+
+    .error {
+      color: #fecaca;
+      border-left-color: #ef4444;
     }
 
     form {
@@ -82,33 +92,55 @@
       width: 110px;
       border: 0;
       border-radius: 10px;
-      background: #2563eb;
       color: white;
       font-weight: 700;
       cursor: pointer;
     }
 
+    #send {
+      background: #2563eb;
+    }
+
+    #stop {
+      background: #dc2626;
+    }
+
     button:disabled {
-      background: #4b5563;
+      background: #4b5563 !important;
       cursor: not-allowed;
     }
 
-    code {
-      background: #030712;
-      padding: 2px 5px;
-      border-radius: 4px;
+    .toolbar {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .small-btn {
+      width: auto;
+      padding: 8px 12px;
+      background: #374151;
+      font-size: 13px;
     }
   </style>
 </head>
-
 <body>
   <main>
-    <h1>Emperor Reborn MVP</h1>
+    <h1>Emperor Reborn</h1>
     <div id="status">连接中...</div>
+
+    <div class="toolbar">
+      <button id="reload" class="small-btn" type="button">刷新历史</button>
+      <button id="diagnostics" class="small-btn" type="button">诊断</button>
+    </div>
+
     <div id="messages"></div>
+
     <form id="form">
       <textarea id="input" placeholder="输入消息。例如：列出当前项目里的 Python 文件，并总结作用。"></textarea>
       <button id="send" type="submit">发送</button>
+      <button id="stop" type="button" disabled>停止</button>
     </form>
   </main>
 
@@ -118,34 +150,53 @@
     const form = document.getElementById('form')
     const input = document.getElementById('input')
     const send = document.getElementById('send')
+    const stopBtn = document.getElementById('stop')
+    const reloadBtn = document.getElementById('reload')
+    const diagnosticsBtn = document.getElementById('diagnostics')
 
-    let ws
+    let ws = null
     let currentAssistantEl = null
+
+    function scrollBottom() {
+      window.scrollTo(0, document.body.scrollHeight)
+    }
 
     function addMessage(role, content) {
       const el = document.createElement('div')
       el.className = `msg ${role}`
       el.textContent = content
       messagesEl.appendChild(el)
-      window.scrollTo(0, document.body.scrollHeight)
+      scrollBottom()
       return el
     }
 
-    function addEvent(content) {
+    function addEvent(content, isError = false) {
       const el = document.createElement('div')
-      el.className = 'event'
+      el.className = isError ? 'event error' : 'event'
       el.textContent = content
       messagesEl.appendChild(el)
-      window.scrollTo(0, document.body.scrollHeight)
+      scrollBottom()
+      return el
     }
 
-    async function loadHistory() {
-      const res = await fetch('/api/history')
-      const rows = await res.json()
+    async function loadBootstrap() {
+      const res = await fetch('/api/bootstrap')
+      const data = await res.json()
+
       messagesEl.innerHTML = ''
-      for (const row of rows) {
+
+      for (const row of data.history || []) {
         addMessage(row.role === 'assistant' ? 'assistant' : 'user', row.content)
       }
+
+      const status = data.status || {}
+      statusEl.textContent = `状态：${status.busy ? '运行中' : '空闲'} · ${status.provider || ''}/${status.model || ''}`
+    }
+
+    async function showDiagnostics() {
+      const res = await fetch('/api/diagnostics')
+      const data = await res.json()
+      addEvent(`诊断：\n${JSON.stringify(data, null, 2)}`)
     }
 
     function connect() {
@@ -167,42 +218,77 @@
         const payload = data.payload || {}
 
         if (event === 'ready') {
-          statusEl.textContent = `已连接 · 模型：${payload.model}`
+          statusEl.textContent = `已连接 · ${payload.provider || ''}/${payload.model || ''}`
         } else if (event === 'user_message') {
           currentAssistantEl = null
         } else if (event === 'assistant_start') {
           currentAssistantEl = addMessage('assistant', '')
           send.disabled = true
+          stopBtn.disabled = false
+          statusEl.textContent = `生成中 · ${payload.provider || ''}/${payload.model || ''}`
         } else if (event === 'message_delta') {
-          if (!currentAssistantEl) currentAssistantEl = addMessage('assistant', '')
+          if (!currentAssistantEl) {
+            currentAssistantEl = addMessage('assistant', '')
+          }
           currentAssistantEl.textContent += payload.content || ''
-          window.scrollTo(0, document.body.scrollHeight)
+          scrollBottom()
         } else if (event === 'tool_call') {
-          addEvent(`调用工具：${payload.tool_name} ${JSON.stringify(payload.args)}`)
+          addEvent(`调用工具：${payload.tool_name}\n参数：${JSON.stringify(payload.args, null, 2)}`)
         } else if (event === 'tool_result') {
-          addEvent(`工具结果：${String(payload.content).slice(0, 500)}`)
+          const content = String(payload.content || '')
+          addEvent(`工具结果：\n${content.slice(0, 800)}${content.length > 800 ? '\n...[已截断显示]' : ''}`)
+        } else if (event === 'runtime_task_cancelled') {
+          send.disabled = false
+          stopBtn.disabled = true
+          currentAssistantEl = null
+          statusEl.textContent = '已取消'
+          addEvent('当前任务已取消。')
         } else if (event === 'assistant_done') {
           send.disabled = false
+          stopBtn.disabled = true
           currentAssistantEl = null
+          statusEl.textContent = '空闲'
         } else if (event === 'error') {
           send.disabled = false
-          addEvent(`错误：${payload.message || JSON.stringify(payload)}`)
+          stopBtn.disabled = true
+          currentAssistantEl = null
+          statusEl.textContent = '错误'
+          addEvent(`错误：${payload.message || JSON.stringify(payload)}`, true)
         }
       }
     }
 
     form.addEventListener('submit', (event) => {
       event.preventDefault()
+
       const text = input.value.trim()
       if (!text) return
+
       addMessage('user', text)
       input.value = ''
       send.disabled = true
-      ws.send(JSON.stringify({ type: 'user_message', content: text }))
+      stopBtn.disabled = false
+
+      ws.send(JSON.stringify({
+        type: 'user_message',
+        content: text,
+      }))
     })
 
-    loadHistory().then(connect)
+    stopBtn.addEventListener('click', async () => {
+      stopBtn.disabled = true
+      await fetch('/api/runtime/stop', { method: 'POST' })
+    })
+
+    reloadBtn.addEventListener('click', async () => {
+      await loadBootstrap()
+    })
+
+    diagnosticsBtn.addEventListener('click', async () => {
+      await showDiagnostics()
+    })
+
+    loadBootstrap().then(connect)
   </script>
 </body>
-
 </html>

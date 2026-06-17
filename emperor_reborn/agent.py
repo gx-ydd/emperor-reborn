@@ -44,7 +44,7 @@ async def read_file(ctx: RunContext[EmperorDeps], path: str, max_chars: int = 12
 
 
 @agent.tool
-async def list_file(ctx: RunContext[EmperorDeps], pattern: str = "**/*", limit: int = 80) -> list[str]:
+async def list_files(ctx: RunContext[EmperorDeps], pattern: str = "**/*", limit: int = 80) -> list[str]:
     try:
         files: list[str] = []
         for path in ctx.deps.workspace.glob(pattern):
@@ -89,7 +89,7 @@ async def run_command(ctx: RunContext[EmperorDeps], command: str, timeout_second
         )
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
         output = stdout.decode(errors="replace")
-        error = stdout.decode(errors="replace")
+        error = stderr.decode(errors="replace")
         return (output + ("\nSTDERR:\n" + error if error else ""))[:12000]
     except Exception as e:
         return f"Error: {e}"

@@ -54,8 +54,9 @@ def doctor() -> None:
         if not os.getenv("OPENAI_BASE_URL"):
             console.print("[yellow]OPENAI_BASE_URL is missing.[/yellow]")
 
+
 @app.command()
-def web() -> None:
+def web(debug: bool = typer.Option(False, "--debug", help="Enable debug log.")) -> None:
     """Start the local web server."""
     settings = load_settings()
     console.print(f"Starting on http://{settings.host}:{settings.port}")
@@ -64,4 +65,5 @@ def web() -> None:
         host=settings.host,
         port=settings.port,
         reload=False,
+        log_level="debug" if debug else "info",
     )

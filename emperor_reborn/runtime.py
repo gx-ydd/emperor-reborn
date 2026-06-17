@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import AsyncIterable, AsyncIterator
+from contextlib import suppress
 
 from pydantic_ai import (
     AgentStreamEvent,
@@ -19,6 +20,7 @@ from emperor_reborn.config import Settings
 from emperor_reborn.events import EventSink, RuntimeEvent
 from emperor_reborn.llm import build_model
 from emperor_reborn.memory import MemoryStore
+from emperor_reborn.runtime_store import RuntimeEventStore
 
 
 class AgentRuntime:
@@ -26,7 +28,34 @@ class AgentRuntime:
         self.settings = setting
         self.memory = MemoryStore(self.settings.memory_dir)
         self.memory.init()
+
+        self.event_store = RuntimeEventStore(self.settings.memory_dir)
+        self.event_store.init()
+
         self.model = build_model(self.settings)
+
+        self.active_task: asyncio.Task[None] | None = None
+        self.active_turn_id: str | None = None
+
+    def is_busy(self) -> bool:
+        return self.active_task is not None and not self.active_task.done()
+
+    def cancel_active_task(self) -> bool:
+        if not self.active_task or self.active_task.done():
+            return False
+        self.active_task.cancel()
+        return True
+
+    async def get_status(self) -> dict[str, object]:
+        return {
+            "busy": self.is_busy(),
+            "active_turn_id": self.active_turn_id,
+            "provider": self.settings.provider,
+            "model": self.settings.model,
+            "workspace": str(self.settings.workspace),
+            "memory_dic": str(self.settings.memory_dir),
+            "permission_mode": str(self.settings.permission_mode),
+        }
 
     async def stream_chat(self, prompt: str) -> AsyncIterator[RuntimeEvent]:
         sink = EventSink()
@@ -37,14 +66,18 @@ class AgentRuntime:
             permission_mode=self.settings.permission_mode,
         )
 
+        async def emit(event: RuntimeEvent) -> RuntimeEvent:
+            await self.event_store.append(event)
+            return event
+
         await self.memory.add_display_message("user", prompt)
 
-        yield sink.make("user_message", content=prompt)
-        yield sink.make(
+        yield await emit(sink.make("assistant_message"))
+        yield await emit(sink.make(
             "assistant_start",
             provider=self.settings.provider,
             model=self.settings.model,
-        )
+        ))
 
         queue: asyncio.Queue[RuntimeEvent | None] = asyncio.Queue()
         final_text_holder = {"text": ""}
@@ -53,8 +86,8 @@ class AgentRuntime:
             await queue.put(event)
 
         async def handle_agent_event(
-            ctx: RunContext[EmperorDeps],
-            event_stream: AsyncIterable[AgentStreamEvent],
+                ctx: RunContext[EmperorDeps],
+                event_stream: AsyncIterable[AgentStreamEvent],
         ) -> None:
             async for event in event_stream:
                 if isinstance(event, PartStartEvent):
@@ -124,7 +157,13 @@ class AgentRuntime:
                 await self.memory.add_display_message("assistant", final_text)
 
                 await push(sink.make("assistant_done", content=final_text))
-
+            except asyncio.CancelledError:
+                await push(
+                    sink.make(
+                        "runtime_task_cancelled",
+                        reason="user_cancelled",
+                    )
+                )
             except Exception as e:
                 await push(
                     sink.make(
@@ -137,13 +176,20 @@ class AgentRuntime:
                 await queue.put(None)
 
         task = asyncio.create_task(run_agent())
+        self.active_task = task
 
         try:
             while True:
                 event = await queue.get()
                 if event is None:
                     break
+                await self.event_store.append(event)
                 yield event
         finally:
             if not task.done():
                 task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+            if self.active_task is task:
+                self.active_task = None
+                self.active_turn_id = None

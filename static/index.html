@@ -40,8 +40,8 @@
     .msg {
       padding: 12px 14px;
       border-radius: 12px;
-      white-space: pre-wrap;
       line-height: 1.55;
+      overflow-wrap: anywhere;
     }
 
     .user {
@@ -56,6 +56,100 @@
       border: 1px solid #1d4ed8;
       align-self: flex-start;
       max-width: 86%;
+    }
+
+    .markdown-body {
+      white-space: normal;
+    }
+
+    .markdown-body > :first-child {
+      margin-top: 0;
+    }
+
+    .markdown-body > :last-child {
+      margin-bottom: 0;
+    }
+
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3,
+    .markdown-body h4,
+    .markdown-body h5,
+    .markdown-body h6 {
+      margin: 14px 0 8px;
+      line-height: 1.25;
+    }
+
+    .markdown-body p {
+      margin: 8px 0;
+    }
+
+    .markdown-body ul,
+    .markdown-body ol {
+      margin: 8px 0;
+      padding-left: 22px;
+    }
+
+    .markdown-body blockquote {
+      margin: 10px 0;
+      padding: 8px 12px;
+      border-left: 4px solid #60a5fa;
+      background: rgba(15, 23, 42, 0.45);
+      color: #dbeafe;
+    }
+
+    .markdown-body a {
+      color: #93c5fd;
+      text-decoration: underline;
+    }
+
+    .markdown-body code {
+      padding: 2px 5px;
+      border-radius: 5px;
+      background: rgba(3, 7, 18, 0.72);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 0.92em;
+    }
+
+    .markdown-body pre {
+      margin: 10px 0;
+      padding: 12px;
+      border-radius: 10px;
+      overflow-x: auto;
+      background: #020617;
+      border: 1px solid #334155;
+    }
+
+    .markdown-body pre code {
+      padding: 0;
+      background: transparent;
+      border-radius: 0;
+      white-space: pre;
+    }
+
+    .markdown-body table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 10px 0;
+      display: block;
+      overflow-x: auto;
+    }
+
+    .markdown-body th,
+    .markdown-body td {
+      border: 1px solid #334155;
+      padding: 6px 8px;
+      text-align: left;
+    }
+
+    .markdown-body th {
+      background: rgba(30, 64, 175, 0.35);
+    }
+
+    .markdown-body hr {
+      border: 0;
+      border-top: 1px solid #334155;
+      margin: 14px 0;
     }
 
     .event {
@@ -161,13 +255,223 @@
       window.scrollTo(0, document.body.scrollHeight)
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;')
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value).replace(/`/g, '&#96;')
+    }
+
+    function renderInlineMarkdown(value) {
+      const codeSpans = []
+      let text = String(value ?? '').replace(/`([^`\n]+)`/g, (_, code) => {
+        const token = `@@CODE_SPAN_${codeSpans.length}@@`
+        codeSpans.push(`<code>${escapeHtml(code)}</code>`)
+        return token
+      })
+
+      text = escapeHtml(text)
+
+      text = text.replace(/\[([^\]]+)]\((https?:\/\/[^\s)]+)\)/g, (_, label, url) => {
+        return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer">${label}</a>`
+      })
+      text = text.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      text = text.replace(/__([^_\n]+)__/g, '<strong>$1</strong>')
+      text = text.replace(/(^|[^\*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+      text = text.replace(/(^|[^_])_([^_\n]+)_/g, '$1<em>$2</em>')
+
+      for (const [index, html] of codeSpans.entries()) {
+        text = text.replaceAll(`@@CODE_SPAN_${index}@@`, html)
+      }
+
+      return text
+    }
+
+    function tryRenderTable(lines, startIndex) {
+      if (startIndex + 1 >= lines.length) return null
+
+      const headerLine = lines[startIndex]
+      const dividerLine = lines[startIndex + 1]
+      if (!headerLine.includes('|') || !/^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(dividerLine)) {
+        return null
+      }
+
+      const splitRow = (line) => line
+        .trim()
+        .replace(/^\|/, '')
+        .replace(/\|$/, '')
+        .split('|')
+        .map((cell) => cell.trim())
+
+      const headers = splitRow(headerLine)
+      const rows = []
+      let index = startIndex + 2
+
+      while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+        const cells = splitRow(lines[index])
+        rows.push(cells)
+        index += 1
+      }
+
+      const thead = `<thead><tr>${headers.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join('')}</tr></thead>`
+      const tbody = `<tbody>${rows.map((row) => `<tr>${headers.map((_, cellIndex) => `<td>${renderInlineMarkdown(row[cellIndex] || '')}</td>`).join('')}</tr>`).join('')}</tbody>`
+
+      return {
+        html: `<table>${thead}${tbody}</table>`,
+        nextIndex: index,
+      }
+    }
+
+    function renderMarkdown(markdown) {
+      const lines = String(markdown ?? '').replace(/\r\n/g, '\n').split('\n')
+      const html = []
+      const paragraph = []
+      let listType = null
+      let listItems = []
+      let inCodeBlock = false
+      let codeFence = ''
+      let codeLanguage = ''
+      let codeLines = []
+
+      const flushParagraph = () => {
+        if (!paragraph.length) return
+        html.push(`<p>${renderInlineMarkdown(paragraph.join('\n')).replace(/\n/g, '<br>')}</p>`)
+        paragraph.length = 0
+      }
+
+      const flushList = () => {
+        if (!listType || !listItems.length) return
+        html.push(`<${listType}>${listItems.map((item) => `<li>${renderInlineMarkdown(item)}</li>`).join('')}</${listType}>`)
+        listType = null
+        listItems = []
+      }
+
+      const flushCodeBlock = () => {
+        const languageClass = codeLanguage ? ` class="language-${escapeAttr(codeLanguage)}"` : ''
+        html.push(`<pre><code${languageClass}>${escapeHtml(codeLines.join('\n'))}</code></pre>`)
+        inCodeBlock = false
+        codeFence = ''
+        codeLanguage = ''
+        codeLines = []
+      }
+
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index]
+
+        if (inCodeBlock) {
+          if (line.trim().startsWith(codeFence)) {
+            flushCodeBlock()
+          } else {
+            codeLines.push(line)
+          }
+          continue
+        }
+
+        const fenceMatch = line.match(/^\s*(```|~~~)\s*([\w.+-]*)\s*$/)
+        if (fenceMatch) {
+          flushParagraph()
+          flushList()
+          inCodeBlock = true
+          codeFence = fenceMatch[1]
+          codeLanguage = fenceMatch[2] || ''
+          continue
+        }
+
+        if (!line.trim()) {
+          flushParagraph()
+          flushList()
+          continue
+        }
+
+        const table = tryRenderTable(lines, index)
+        if (table) {
+          flushParagraph()
+          flushList()
+          html.push(table.html)
+          index = table.nextIndex - 1
+          continue
+        }
+
+        const headingMatch = line.match(/^(#{1,6})\s+(.+)$/)
+        if (headingMatch) {
+          flushParagraph()
+          flushList()
+          const level = headingMatch[1].length
+          html.push(`<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`)
+          continue
+        }
+
+        if (/^\s*([-*_])\s*\1\s*\1(\s*\1)*\s*$/.test(line)) {
+          flushParagraph()
+          flushList()
+          html.push('<hr>')
+          continue
+        }
+
+        const quoteMatch = line.match(/^\s*>\s?(.+)$/)
+        if (quoteMatch) {
+          flushParagraph()
+          flushList()
+          html.push(`<blockquote>${renderInlineMarkdown(quoteMatch[1])}</blockquote>`)
+          continue
+        }
+
+        const unorderedMatch = line.match(/^\s*[-*+]\s+(.+)$/)
+        if (unorderedMatch) {
+          flushParagraph()
+          if (listType && listType !== 'ul') flushList()
+          listType = 'ul'
+          listItems.push(unorderedMatch[1])
+          continue
+        }
+
+        const orderedMatch = line.match(/^\s*\d+\.\s+(.+)$/)
+        if (orderedMatch) {
+          flushParagraph()
+          if (listType && listType !== 'ol') flushList()
+          listType = 'ol'
+          listItems.push(orderedMatch[1])
+          continue
+        }
+
+        flushList()
+        paragraph.push(line)
+      }
+
+      if (inCodeBlock) {
+        flushCodeBlock()
+      }
+
+      flushParagraph()
+      flushList()
+
+      return html.join('\n') || ''
+    }
+
+    function renderMessageContent(el) {
+      el.innerHTML = renderMarkdown(el.dataset.raw || '')
+    }
+
     function addMessage(role, content) {
       const el = document.createElement('div')
-      el.className = `msg ${role}`
-      el.textContent = content
+      el.className = `msg ${role} markdown-body`
+      el.dataset.raw = content || ''
+      renderMessageContent(el)
       messagesEl.appendChild(el)
       scrollBottom()
       return el
+    }
+
+    function appendMessageDelta(el, content) {
+      el.dataset.raw = `${el.dataset.raw || ''}${content || ''}`
+      renderMessageContent(el)
+      scrollBottom()
     }
 
     function addEvent(content, isError = false) {
@@ -230,8 +534,7 @@
           if (!currentAssistantEl) {
             currentAssistantEl = addMessage('assistant', '')
           }
-          currentAssistantEl.textContent += payload.content || ''
-          scrollBottom()
+          appendMessageDelta(currentAssistantEl, payload.content || '')
         } else if (event === 'tool_call') {
           addEvent(`调用工具：${payload.tool_name}\n参数：${JSON.stringify(payload.args, null, 2)}`)
         } else if (event === 'tool_result') {

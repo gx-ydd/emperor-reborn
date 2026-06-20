@@ -43,5 +43,14 @@ def build_model(settings: Settings):
                 base_url=base_url,
             ),
         )
-
+    if settings.provider in ["local", "local-openai"]:
+        if not settings.local_base_url:
+            raise RuntimeError("Missing LOCAL_BASE_URL.")
+        return OpenAIChatModel(
+            settings.model,
+            provider=OpenAIProvider(
+                api_key=settings.local_api_key,
+                base_url=settings.local_base_url,
+            ),
+        )
     raise RuntimeError(f"Unsupported EMPEROR_PROVIDER: {settings.provider}")

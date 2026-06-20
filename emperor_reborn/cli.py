@@ -53,7 +53,10 @@ def doctor() -> None:
             console.print("[yellow]OPENAI_API_KEY is missing.[/yellow]")
         if not os.getenv("OPENAI_BASE_URL"):
             console.print("[yellow]OPENAI_BASE_URL is missing.[/yellow]")
-
+    elif settings.provider in {"local", "local-openai"}:
+        console.print("[green]Local OpenAI-compatible mode enabled.[/green]")
+        console.print(f"Local base URL: [cyan]{settings.local_base_url}[/cyan]")
+        console.print("[green]No real API key is required.[/green]")
 
 @app.command()
 def web(debug: bool = typer.Option(False, "--debug", help="Enable debug log.")) -> None:

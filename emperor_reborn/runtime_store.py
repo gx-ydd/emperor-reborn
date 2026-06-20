@@ -73,7 +73,7 @@ class RuntimeEventStore:
     ) -> list[dict[str, Any]]:
         self.init()
 
-        rows = list[dict[str, Any]] = []
+        rows: list[dict[str, Any]] = []
         with self.event_path.open("r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()

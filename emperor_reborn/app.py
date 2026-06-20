@@ -40,14 +40,14 @@ async def health() -> dict[str, object]:
 
 @app.get("/api/bootstrap")
 async def bootstrap() -> dict[str, object]:
-    history = await runtime.memory.get_display_messages()
-    runtime_events = await runtime.event_store.list_events(limit=300)
+    histories = await runtime.memory.get_display_messages()
+    runtime_event_list = await runtime.event_store.list_events(limit=300)
     status = await runtime.get_status()
 
     return {
         "status": status,
-        "history": history,
-        "runtime_events": runtime_events,
+        "history": histories,
+        "runtime_events": runtime_event_list,
     }
 
 

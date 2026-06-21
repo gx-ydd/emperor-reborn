@@ -29,8 +29,8 @@ def build_model(settings: Settings):
         )
 
     if settings.provider == "openai-compatible":
-        api_key = os.getenv("OPENAI_API_KEY")
-        base_url = os.getenv("OPENAI_BASE_URL")
+        api_key = settings.openai_key
+        base_url = settings.openai_base_url
         if not api_key:
             raise RuntimeError("Missing OPENAI_API_KEY.")
         if not base_url:

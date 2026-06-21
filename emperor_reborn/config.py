@@ -17,6 +17,7 @@ class Settings:
     model: str
     alibaba_base_url: str
     openai_base_url: str
+    openai_key: str
     local_base_url: str
     local_api_key: str
     permission_mode: str
@@ -50,6 +51,7 @@ def load_settings() -> Settings:
             "https://dashscope.aliyuncs.com/compatible-mode/v1",
         ),
         openai_base_url=_env("OPENAI_BASE_URL"),
+        openai_key=_env("OPENAI_API_KEY"),
         local_base_url=_env("EMPEROR_LOCAL_BASE_URL"),
         local_api_key=_env("EMPEROR_LOCAL_API_KEY", "local-no-key"),
         permission_mode=_env("EMPEROR_PERMISSION_MODE", "ask_before_edit"),

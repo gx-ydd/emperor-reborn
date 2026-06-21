@@ -40,14 +40,16 @@ async def health() -> dict[str, object]:
 
 @app.get("/api/bootstrap")
 async def bootstrap() -> dict[str, object]:
-    histories = await runtime.memory.get_display_messages()
-    runtime_event_list = await runtime.event_store.list_events(limit=300)
+    history = await runtime.memory.get_display_messages()
+    runtime_events = await runtime.event_store.list_events(limit=300)
     status = await runtime.get_status()
+    token_usage = await runtime.token_usage.today_summary()
 
     return {
         "status": status,
-        "history": histories,
-        "runtime_events": runtime_event_list,
+        "history": history,
+        "runtime_events": runtime_events,
+        "token_usage": token_usage,
     }
 
 
@@ -70,6 +72,22 @@ async def runtime_events(
     }
 
 
+@app.get("/api/token-usage")
+async def token_usage(
+        days: int = Query(default=14, ge=1, le=365),
+        recent_limit: int = Query(default=100, ge=1, le=1000),
+) -> dict[str, object]:
+    today = await runtime.token_usage.today_summary()
+    daily = await runtime.token_usage.daily_summary(days=days)
+    recent = await runtime.token_usage.list_records(limit=recent_limit)
+
+    return {
+        "today": today,
+        "daily": daily,
+        "recent": recent,
+    }
+
+
 @app.post("/api/runtime/stop")
 async def stop_runtime() -> dict[str, object]:
     cancelled = runtime.cancel_active_task()
@@ -84,14 +102,17 @@ async def stop_runtime() -> dict[str, object]:
 async def diagnostics() -> dict[str, object]:
     status = await runtime.get_status()
     runtime_stats = await runtime.event_store.stats()
+    token_usage = await runtime.token_usage.today_summary()
 
     return {
         "status": status,
         "runtime": runtime_stats,
+        "token_usage": token_usage,
         "paths": {
             "root": str(ROOT),
             "static_dir": str(STATIC_DIR),
             "memory_dir": str(settings.memory_dir),
+            "token_usage_path": str(runtime.token_usage.usage_path),
         },
     }
 

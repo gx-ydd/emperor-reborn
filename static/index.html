@@ -1,5 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
+
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -62,11 +63,11 @@
       white-space: normal;
     }
 
-    .markdown-body > :first-child {
+    .markdown-body> :first-child {
       margin-top: 0;
     }
 
-    .markdown-body > :last-child {
+    .markdown-body> :last-child {
       margin-bottom: 0;
     }
 
@@ -219,6 +220,7 @@
     }
   </style>
 </head>
+
 <body>
   <main>
     <h1>Emperor Reborn</h1>
@@ -253,6 +255,18 @@
 
     function scrollBottom() {
       window.scrollTo(0, document.body.scrollHeight)
+    }
+    function formatTokenUsage(usage) {
+      usage = usage || {}
+
+      return [
+        `input ${usage.input_tokens || 0}`,
+        `output ${usage.output_tokens || 0}`,
+        `total ${usage.total_tokens || 0}`,
+        `requests ${usage.requests || 0}`,
+        `tools ${usage.tool_calls || 0}`,
+        usage.source ? `source ${usage.source}` : '',
+      ].filter(Boolean).join(' / ')
     }
 
     function escapeHtml(value) {
@@ -494,7 +508,9 @@
       }
 
       const status = data.status || {}
-      statusEl.textContent = `状态：${status.busy ? '运行中' : '空闲'} · ${status.provider || ''}/${status.model || ''}`
+      const usage = status.token_usage_today || data.token_usage || {}
+
+      statusEl.textContent = `状态：${status.busy ? '运行中' : '空闲'} · ${status.provider || ''}/${status.model || ''} · 今日 tokens ${usage.total_tokens || 0}`
     }
 
     async function showDiagnostics() {
@@ -546,17 +562,38 @@
           currentAssistantEl = null
           statusEl.textContent = '已取消'
           addEvent('当前任务已取消。')
-        } else if (event === 'assistant_done') {
+
+          if (payload.usage) {
+            addEvent(`取消请求 Token 估算：${formatTokenUsage(payload.usage)}`)
+          }
+        }
+        else if (event === 'token_usage') {
+          const usage = payload.usage || {}
+          addEvent(`Token 用量：${formatTokenUsage(usage)}`)
+
+        }
+        else if (event === 'assistant_done') {
           send.disabled = false
           stopBtn.disabled = true
           currentAssistantEl = null
-          statusEl.textContent = '空闲'
+
+          const usage = payload.usage || {}
+          if (usage.total_tokens) {
+            statusEl.textContent = `空闲 · 本次 tokens ${usage.total_tokens}`
+          } else {
+            statusEl.textContent = '空闲'
+          }
         } else if (event === 'error') {
           send.disabled = false
           stopBtn.disabled = true
           currentAssistantEl = null
           statusEl.textContent = '错误'
+
           addEvent(`错误：${payload.message || JSON.stringify(payload)}`, true)
+
+          if (payload.usage) {
+            addEvent(`失败请求 Token 估算：${formatTokenUsage(payload.usage)}`, true)
+          }
         }
       }
     }
@@ -594,4 +631,5 @@
     loadBootstrap().then(connect)
   </script>
 </body>
+
 </html>

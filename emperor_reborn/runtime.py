@@ -114,14 +114,14 @@ class AgentRuntime:
             }
 
     async def _record_failed_usage(
-        self,
-        *,
-        turn_id: str,
-        prompt: str,
-        partial_output: str,
-        status: str,
-        error_type: str,
-        error_message: str,
+            self,
+            *,
+            turn_id: str,
+            prompt: str,
+            partial_output: str,
+            status: str,
+            error_type: str,
+            error_message: str,
     ) -> dict[str, object]:
         """记录失败或取消请求的估算 token 用量。"""
         try:
@@ -153,6 +153,7 @@ class AgentRuntime:
                 "error_type": type(exc).__name__,
                 "error_message": str(exc),
             }
+
     async def stream_chat(self, prompt: str) -> AsyncIterator[RuntimeEvent]:
         sink = EventSink()
 
@@ -232,7 +233,7 @@ class AgentRuntime:
 
         async def run_agent() -> None:
             try:
-                message_history = await self.memory.get_model_messages()
+                message_history = await self.memory.get_model_messages(max_turns=24)
 
                 result = await agent.run(
                     prompt,
